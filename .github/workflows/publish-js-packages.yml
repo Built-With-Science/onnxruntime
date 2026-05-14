@@ -1,0 +1,62 @@
+name: Publish JS packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Skip the actual npm publish (build + pack only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@Built-With-Science"
+
+      - name: Install workspace TypeScript (needed by bob)
+        working-directory: js
+        run: npm install --ignore-scripts
+
+      - name: Install + build onnxruntime-common
+        working-directory: js/common
+        run: |
+          npm install
+          npm run build
+
+      - name: Install + build onnxruntime-react-native
+        working-directory: js/react_native
+        run: |
+          npm install --ignore-scripts
+          npm run prepare
+
+      - name: Publish @Built-With-Science/onnxruntime-common
+        if: ${{ !inputs.dry-run }}
+        working-directory: js/common
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
+
+      - name: Publish @Built-With-Science/onnxruntime-react-native
+        if: ${{ !inputs.dry-run }}
+        working-directory: js/react_native
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
+
+      - name: Dry-run pack (no publish)
+        if: ${{ inputs.dry-run }}
+        run: |
+          cd js/common && npm pack
+          cd ../react_native && npm pack
+          ls -lh js/common/*.tgz js/react_native/*.tgz
