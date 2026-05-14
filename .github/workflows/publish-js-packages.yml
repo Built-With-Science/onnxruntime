@@ -58,16 +58,20 @@ jobs:
           npm install
           npm run build
 
+      # Publish common before installing react_native, otherwise the latter's
+      # `npm install` can't resolve the scoped common dependency and falls
+      # back to registry.npmjs.org (which 404s with a misleading "no capital
+      # letters" message).
+      - name: Publish @Built-With-Science/onnxruntime-common
+        if: ${{ !inputs.dry-run }}
+        working-directory: src/js/common
+        run: npm publish
+
       - name: Install + build @Built-With-Science/onnxruntime-react-native
         working-directory: src/js/react_native
         run: |
           npm install --ignore-scripts
           npm run prepare
-
-      - name: Publish @Built-With-Science/onnxruntime-common
-        if: ${{ !inputs.dry-run }}
-        working-directory: src/js/common
-        run: npm publish
 
       - name: Publish @Built-With-Science/onnxruntime-react-native
         if: ${{ !inputs.dry-run }}
