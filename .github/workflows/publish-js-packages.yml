@@ -3,6 +3,10 @@ name: Publish JS packages
 on:
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Upstream onnxruntime tag to publish (e.g. v1.25.0)"
+        required: true
+        type: string
       dry-run:
         description: "Skip the actual npm publish (build + pack only)"
         type: boolean
@@ -16,47 +20,63 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout overlay tooling (this branch)
+        uses: actions/checkout@v4
+        with:
+          path: overlay
+
+      - name: Checkout onnxruntime at ${{ inputs.tag }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: src
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@Built-With-Science"
 
-      - name: Install workspace TypeScript (needed by bob)
-        working-directory: js
+      - name: Configure .npmrc for GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > ~/.npmrc <<EOF
+          @Built-With-Science:registry=https://npm.pkg.github.com
+          //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+          always-auth=true
+          EOF
+
+      - name: Apply BWS overlay to ${{ inputs.tag }} checkout
+        run: bash overlay/scripts/bws-rename-js-packages.sh "$GITHUB_WORKSPACE/src"
+
+      - name: Install workspace TypeScript (needed by react_native bob build)
+        working-directory: src/js
         run: npm install --ignore-scripts
 
-      - name: Install + build onnxruntime-common
-        working-directory: js/common
+      - name: Install + build @Built-With-Science/onnxruntime-common
+        working-directory: src/js/common
         run: |
           npm install
           npm run build
 
-      - name: Install + build onnxruntime-react-native
-        working-directory: js/react_native
+      - name: Install + build @Built-With-Science/onnxruntime-react-native
+        working-directory: src/js/react_native
         run: |
           npm install --ignore-scripts
           npm run prepare
 
       - name: Publish @Built-With-Science/onnxruntime-common
         if: ${{ !inputs.dry-run }}
-        working-directory: js/common
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: src/js/common
         run: npm publish
 
       - name: Publish @Built-With-Science/onnxruntime-react-native
         if: ${{ !inputs.dry-run }}
-        working-directory: js/react_native
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: src/js/react_native
         run: npm publish
 
-      - name: Dry-run pack (no publish)
+      - name: Dry-run pack output (no publish)
         if: ${{ inputs.dry-run }}
         run: |
-          cd js/common && npm pack
+          cd src/js/common && npm pack
           cd ../react_native && npm pack
-          ls -lh js/common/*.tgz js/react_native/*.tgz
+          ls -lh src/js/common/*.tgz src/js/react_native/*.tgz
