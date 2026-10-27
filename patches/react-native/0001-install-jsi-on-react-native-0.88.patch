@@ -1,0 +1,98 @@
+diff --git a/js/react_native/ios/OnnxruntimeModule.mm b/js/react_native/ios/OnnxruntimeModule.mm
+index 8155f92aa..6990ff790 100644
+--- a/js/react_native/ios/OnnxruntimeModule.mm
++++ b/js/react_native/ios/OnnxruntimeModule.mm
+@@ -10,9 +10,37 @@
+ #import <ReactCommon/RCTTurboModule.h>
+ #import <jsi/jsi.h>
+ 
++#if __has_include(<React/RCTCallInvokerModule.h>)
++#import <React/RCTCallInvoker.h>
++#import <React/RCTCallInvokerModule.h>
++#define ORT_RN_HAS_CALL_INVOKER_MODULE 1
++#endif
++
++#if __has_include(<React/RCTBridgeProxy.h>)
++#import <React/RCTBridgeProxy.h>
++#define ORT_RN_HAS_BRIDGE_PROXY 1
++#endif
++
++#import <objc/runtime.h>
++
++// Bridge mode exposes the runtime pointer on the bridge object. React Native
++// 0.88 declares no RCTCxxBridge class, so the selector is declared here and
++// resolved at run time.
++@protocol OnnxruntimeJSIRuntimeProvider
++- (void*)runtime;
++@end
++
++#ifdef ORT_RN_HAS_CALL_INVOKER_MODULE
++@interface OnnxruntimeModule () <RCTCallInvokerModule>
++@end
++#endif
++
+ @implementation OnnxruntimeModule
+ 
+ @synthesize bridge = _bridge;
++#ifdef ORT_RN_HAS_CALL_INVOKER_MODULE
++@synthesize callInvoker = _callInvoker;
++#endif
+ 
+ static std::shared_ptr<onnxruntimejsi::Env> env;
+ 
+@@ -23,24 +51,47 @@ - (void)setBridge:(RCTBridge*)bridge {
+ }
+ 
+ /**
+- * React native binding API to install onnxruntime JSI API
++ * Installs the JSI bindings on the runtime that owns the calling JS thread.
++ * This blocking method runs on the JS thread, so the runtime pointer may be
++ * used directly. The call invoker must not be used to reach the runtime: in
++ * bridgeless mode its invokeSync queues onto the JS thread's run loop and
++ * waits, which cannot complete from inside a sync native call.
+  */
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install) {
+   @try {
+-    RCTCxxBridge* cxxBridge = (RCTCxxBridge*)_bridge;
+-    if (cxxBridge == nil) {
++    id bridge = _bridge;
++    if (bridge == nil) {
+       return @false;
+     }
+ 
+-    auto jsiRuntime = (facebook::jsi::Runtime*)cxxBridge.runtime;
+-    if (jsiRuntime == nil) {
++    facebook::jsi::Runtime* jsiRuntime = nullptr;
++#ifdef ORT_RN_HAS_BRIDGE_PROXY
++    // Bridgeless: the module manager sets an RCTBridgeProxy as the bridge. It
++    // is an NSProxy, so it is identified by class without messaging it, and
++    // -runtime is a method the proxy class implements itself.
++    if (object_getClass(bridge) == [RCTBridgeProxy class]) {
++      jsiRuntime = (facebook::jsi::Runtime*)[(id<OnnxruntimeJSIRuntimeProvider>)bridge runtime];
++    } else
++#endif
++    if ([bridge respondsToSelector:@selector(runtime)]) {
++      // Bridge mode: RCTCxxBridge exposes the runtime pointer.
++      jsiRuntime = (facebook::jsi::Runtime*)[(id<OnnxruntimeJSIRuntimeProvider>)bridge runtime];
++    }
++    if (jsiRuntime == nullptr) {
+       return @false;
+     }
+-    auto& runtime = *jsiRuntime;
+-    auto jsiInvoker = _bridge.jsCallInvoker;
+ 
+-    env = onnxruntimejsi::install(runtime, jsiInvoker);
++    std::shared_ptr<facebook::react::CallInvoker> jsInvoker;
++#ifdef ORT_RN_HAS_CALL_INVOKER_MODULE
++    if (_callInvoker != nil) {
++      jsInvoker = [_callInvoker callInvoker];
++    }
++#endif
++    if (jsInvoker == nullptr) {
++      jsInvoker = _bridge.jsCallInvoker;
++    }
+ 
++    env = onnxruntimejsi::install(*jsiRuntime, jsInvoker);
+     return @true;
+   } @catch (...) {
+     return @false;
