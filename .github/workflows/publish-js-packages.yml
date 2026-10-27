@@ -7,6 +7,14 @@ on:
         description: "Upstream onnxruntime tag to publish (e.g. v1.25.0)"
         required: true
         type: string
+      bws-version:
+        description: "Version to publish for the react-native package, e.g. 1.25.1"
+        required: true
+        type: string
+      publish-common:
+        description: "Publish @Built-With-Science/onnxruntime-common too"
+        type: boolean
+        default: true
       dry-run:
         description: "Skip the actual npm publish (build + pack only)"
         type: boolean
@@ -48,6 +56,13 @@ jobs:
       - name: Apply BWS overlay to ${{ inputs.tag }} checkout
         run: bash overlay/scripts/bws-rename-js-packages.sh "$GITHUB_WORKSPACE/src"
 
+      - name: Apply BWS patches
+        run: bash overlay/scripts/bws-apply-patches.sh "$GITHUB_WORKSPACE/src"
+
+      - name: Set react-native package version
+        working-directory: src/js/react_native
+        run: npm version "${{ inputs.bws-version }}" --no-git-tag-version --allow-same-version
+
       - name: Install workspace TypeScript (needed by react_native bob build)
         working-directory: src/js
         run: npm install --ignore-scripts
@@ -63,7 +78,7 @@ jobs:
       # back to registry.npmjs.org (which 404s with a misleading "no capital
       # letters" message).
       - name: Publish @Built-With-Science/onnxruntime-common
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && inputs.publish-common }}
         working-directory: src/js/common
         run: npm publish
 
